@@ -131,7 +131,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
 .file-card-info{padding:11px 12px}
 .file-card-name{font-size:12.5px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:3px}
 .file-card-meta{font-size:11px;color:var(--text3)}
-.folder-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r12);cursor:pointer;transition:all .22s;padding:16px;display:flex;align-items:center;gap:12px;animation:fadeIn .35s ease both}
+.folder-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r12);cursor:pointer;transition:all .22s;padding:14px 16px;display:flex;align-items:center;gap:12px;animation:fadeIn .35s ease both}
 .folder-card:hover{border-color:var(--info);transform:translateY(-2px);box-shadow:0 4px 20px rgba(85,153,224,.1)}
 .empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:70px 20px;color:var(--text3);text-align:center;gap:13px;grid-column:1/-1}
 .empty-state h3{font-family:var(--serif);font-size:18px;color:var(--text2)}
@@ -962,8 +962,9 @@ function showPage(n){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.getElementById('page-'+n).classList.add('active');
   document.querySelectorAll('.nav-item[data-page]').forEach(el=>el.classList.toggle('active',el.dataset.page===n));
+  if(n!=='files'){currentFolderId=null;document.querySelectorAll('.nav-folder-item').forEach(el=>{el.style.background='';el.style.color=''})}
   curPage=n;closeMobileNav();
-  if(n==='files'){currentFolderId=null;renderFiles()}
+  if(n==='files')renderFiles();
   if(n==='history')renderHistory();
 }
 
@@ -1159,10 +1160,30 @@ async function processUpload(file){
     }
   }
 
-  fill.style.width='88%';lbl.textContent='Saving…';
+  fill.style.width='88%';lbl.textContent='Saving to cloud…';
 
-  const obj={name:file.name,type:uploadType,size:file.size,chunks,chunkCount:chunks.length,createdAt:Date.now(),folderId:currentFolderId||null,fav:false};
-  await dbPush(`users/${uid()}/files`,obj);
+  // CRITICAL FIX: Firebase Realtime DB has a ~10MB per-write limit.
+  // Store file metadata first, then each chunk as its own child node.
+  const {db,ref,set,push}=_FB;
+  const newRef=push(ref(db,`users/${uid()}/files`));
+  const fileId=newRef.key;
+
+  // Write metadata WITHOUT chunks first
+  await set(newRef,{
+    name:file.name,type:uploadType,size:file.size,
+    chunkCount:chunks.length,createdAt:Date.now(),
+    folderId:currentFolderId||null,fav:false
+  });
+
+  // Write each chunk as a separate node (each ≤700KB, well under Firebase limit)
+  for(let i=0;i<chunks.length;i++){
+    await set(ref(db,`users/${uid()}/files/${fileId}/chunks/${i}`),chunks[i]);
+    fill.style.width=(88+((i+1)/chunks.length)*11)+'%';
+    lbl.textContent=`Saving chunk ${i+1}/${chunks.length}…`;
+    // Yield every chunk so UI stays responsive
+    await new Promise(r=>setTimeout(r,0));
+  }
+
   fill.style.width='100%';lbl.textContent='Done!';mb.textContent='';
   pgStatus.textContent='Upload complete';
   setTimeout(()=>closeUpload(),800);
@@ -1183,13 +1204,28 @@ async function deleteFolder(id){
   for(const f of allFiles.filter(f=>f.folderId===id))await dbSet(`users/${uid()}/files/${f.id}/folderId`,null);
   toast('Folder deleted');
 }
-function openFolder(id){currentFolderId=id;showPage('files')}
+function openFolder(id){
+  currentFolderId=id;
+  // Navigate to files page without resetting currentFolderId
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.getElementById('page-files').classList.add('active');
+  document.querySelectorAll('.nav-item[data-page]').forEach(el=>el.classList.toggle('active',el.dataset.page==='files'));
+  curPage='files';
+  closeMobileNav();
+  renderFiles();
+  // Highlight active folder in nav
+  document.querySelectorAll('.nav-folder-item').forEach(el=>{
+    const isActive=el.dataset.fid===id;
+    el.style.background=isActive?'var(--accent3)':'';
+    el.style.color=isActive?'var(--accent)':'';
+  });
+}
 function renderNavFolders(){
   const el=document.getElementById('nav-folders');
   el.innerHTML=allFolders.map(f=>`
-    <div class="nav-folder-item" onclick="openFolder('${f.id}')">
+    <div class="nav-folder-item" data-fid="${f.id}" onclick="openFolder('${f.id}')">
       <svg width="14" height="14" fill="none" viewBox="0 0 14 14"><path d="M1 3a1 1 0 011-1h3l1 1.5H12a1 1 0 011 1v6a1 1 0 01-1 1H2a1 1 0 01-1-1V3z" fill="${f.color}44" stroke="${f.color}" stroke-width="1.2"/></svg>
-      <span class="nav-lbl">${esc(f.name)}</span>
+      <span class="nav-lbl" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.name)}</span>
     </div>`).join('');
 }
 
@@ -1202,11 +1238,24 @@ function renderDash(){
 
   const df=document.getElementById('dash-folders');
   df.innerHTML=allFolders.length?allFolders.map((f,i)=>`
-    <div class="file-row" onclick="openFolder('${f.id}')" style="animation-delay:${i*.04}s">
+    <div class="file-row" data-folder-id="${f.id}" style="animation-delay:${i*.04}s">
       <div class="file-icon folder"><svg width="20" height="20" fill="none" viewBox="0 0 20 20"><path d="M2 5a1 1 0 011-1h4l2 2.5H16a1 1 0 011 1v8a1 1 0 01-1 1H3a1 1 0 01-1-1V5z" fill="${f.color}22" stroke="${f.color}" stroke-width="1.5"/></svg></div>
       <div class="file-info"><div class="file-name">${esc(f.name)}</div><div class="file-meta">${allFiles.filter(x=>x.folderId===f.id).length} files</div></div>
       <span class="badge badge-folder">Folder</span>
+      <div class="file-acts">
+        <button class="icon-btn" onclick="event.stopPropagation();showFolderMenu(event,'${f.id}')" title="Options">
+          <svg width="14" height="14" fill="none" viewBox="0 0 14 14"><circle cx="7" cy="3" r="1" fill="currentColor"/><circle cx="7" cy="7" r="1" fill="currentColor"/><circle cx="7" cy="11" r="1" fill="currentColor"/></svg>
+        </button>
+      </div>
     </div>`).join(''):`<div style="font-size:13px;color:var(--text3);padding:8px 0">No folders yet — create one above</div>`;
+
+  // Attach folder row clicks
+  document.querySelectorAll('#dash-folders .file-row[data-folder-id]').forEach(el=>{
+    el.addEventListener('click',function(e){
+      if(e.target.closest('button'))return;
+      openFolder(this.dataset.folderId);
+    });
+  });
 
   const dr=document.getElementById('dash-recent');
   const recent=allFiles.slice(0,8);
@@ -1227,8 +1276,15 @@ function renderFiles(){
   const filter=document.getElementById('f-filter').value;
   const sort=document.getElementById('f-sort').value;
   const bc=document.getElementById('breadcrumb');
-  if(currentFolderId){const folder=allFolders.find(f=>f.id===currentFolderId);bc.innerHTML=`<span style="cursor:pointer;color:var(--accent)" onclick="currentFolderId=null;renderFiles()">All Files</span><svg width="12" height="12" fill="none" viewBox="0 0 12 12"><path d="M4 2l4 4-4 4" stroke="var(--text3)" stroke-width="1.3"/></svg><span style="color:var(--text2)">${esc(folder?.name||'Folder')}</span>`}
-  else bc.innerHTML='';
+  if(currentFolderId){
+    const folder=allFolders.find(f=>f.id===currentFolderId);
+    bc.innerHTML=`
+      <span style="cursor:pointer;color:var(--accent);font-weight:600" onclick="exitFolder()">← All Files</span>
+      <svg width="12" height="12" fill="none" viewBox="0 0 12 12"><path d="M4 2l4 4-4 4" stroke="var(--text3)" stroke-width="1.3"/></svg>
+      <span style="color:var(--text2)">${esc(folder?.name||'Folder')}</span>`;
+  } else {
+    bc.innerHTML='';
+  }
 
   const grid=document.getElementById('files-grid');let items=[];
   if(!currentFolderId&&(filter==='all'||filter==='folder'))allFolders.forEach(f=>{if(!search||f.name.toLowerCase().includes(search))items.push({...f,_type:'folder'})});
@@ -1239,15 +1295,42 @@ function renderFiles(){
   items=[...items,...files];
   if(!items.length){grid.innerHTML=`<div class="empty-state"><svg width="44" height="44" fill="none" viewBox="0 0 44 44"><rect x="6" y="5" width="26" height="34" rx="4" stroke="var(--border2)" stroke-width="2"/></svg><h3>${search?'No results':'No files'}</h3><p>${search?'Try different search':'Add files above'}</p></div>`;return}
   grid.innerHTML=items.map((item,i)=>{
-    if(item._type==='folder')return`<div class="folder-card" style="animation-delay:${i*.03}s;grid-column:span 1" onclick="openFolder('${item.id}')" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="folderDrop(event,'${item.id}');this.classList.remove('drag-over')" oncontextmenu="event.preventDefault();showCtxMenu(event,'${item.id}','folder')">
-      <svg width="28" height="28" fill="none" viewBox="0 0 28 28"><path d="M3 7a2 2 0 012-2h6l2 3h10a2 2 0 012 2v12a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" fill="${item.color}22" stroke="${item.color}" stroke-width="1.8"/></svg>
-      <div><div style="font-size:13px;font-weight:600;color:var(--text)">${esc(item.name)}</div><div style="font-size:11px;color:var(--text3);margin-top:2px">${allFiles.filter(f=>f.folderId===item.id).length} files</div></div>
-    </div>`;
+    if(item._type==='folder'){
+      // Use data attributes + event delegation to avoid onclick vs drag conflicts
+      return`<div class="folder-card" style="animation-delay:${i*.03}s"
+        data-folder-id="${item.id}"
+        ondragover="event.preventDefault();this.classList.add('drag-over')"
+        ondragleave="this.classList.remove('drag-over')"
+        ondrop="folderDrop(event,'${item.id}');this.classList.remove('drag-over')">
+        <svg width="28" height="28" fill="none" viewBox="0 0 28 28"><path d="M3 7a2 2 0 012-2h6l2 3h10a2 2 0 012 2v12a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" fill="${item.color}22" stroke="${item.color}" stroke-width="1.8"/></svg>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(item.name)}</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px">${allFiles.filter(f=>f.folderId===item.id).length} files</div>
+        </div>
+        <button class="icon-btn" style="flex-shrink:0" onclick="event.stopPropagation();showFolderMenu(event,'${item.id}')" title="Options">
+          <svg width="14" height="14" fill="none" viewBox="0 0 14 14"><circle cx="7" cy="3" r="1" fill="currentColor"/><circle cx="7" cy="7" r="1" fill="currentColor"/><circle cx="7" cy="11" r="1" fill="currentColor"/></svg>
+        </button>
+      </div>`;
+    }
     return`<div class="file-card" style="animation-delay:${i*.03}s" onclick="openFileById('${item.id}')" draggable="true" ondragstart="fileDragStart(event,'${item.id}')" oncontextmenu="event.preventDefault();showCtxMenu(event,'${item.id}','file')">
       <div class="file-card-thumb">${fThumb(item.type)}<div class="file-card-fav fav-icon ${item.fav?'on':''}" onclick="event.stopPropagation();toggleFav('${item.id}')">★</div></div>
       <div class="file-card-info"><div class="file-card-name">${esc(item.name)}</div><div class="file-card-meta">${item.type.toUpperCase()} · ${fmtDate(item.createdAt)}</div><span class="badge badge-${item.type}" style="margin-top:5px">${item.type.toUpperCase()}</span></div>
     </div>`;
   }).join('');
+
+  // Attach folder click via delegation (avoids drag/button conflicts)
+  document.querySelectorAll('.folder-card[data-folder-id]').forEach(el=>{
+    el.addEventListener('click',function(e){
+      if(e.target.closest('button'))return; // don't open if clicking options btn
+      openFolder(this.dataset.folderId);
+    });
+  });
+}
+function exitFolder(){
+  currentFolderId=null;
+  renderFiles();
+  // Clear nav highlight
+  document.querySelectorAll('.nav-folder-item').forEach(el=>{el.style.background='';el.style.color=''});
 }
 function showFavs(){document.getElementById('f-filter').value='fav';showPage('files')}
 async function toggleFav(id){const f=allFiles.find(x=>x.id===id);if(!f)return;await dbSet(`users/${uid()}/files/${id}/fav`,!f.fav);toast(!f.fav?'Added to favorites':'Removed from favorites')}
@@ -1259,6 +1342,17 @@ function gridDragOver(e){e.preventDefault();document.getElementById('files-grid'
 function gridDragLeave(e){if(!e.relatedTarget||!e.currentTarget.contains(e.relatedTarget))document.getElementById('files-grid').classList.remove('drag-over')}
 function gridDrop(e){e.preventDefault();document.getElementById('files-grid').classList.remove('drag-over');const id=e.dataTransfer.getData('text/plain')||dragFileId;if(id&&currentFolderId){dbSet(`users/${uid()}/files/${id}/folderId`,null);toast('Moved to root')}dragFileId=null}
 
+function showFolderMenu(e,id){
+  e.stopPropagation();
+  ctxTarget=id;ctxItemType='folder';
+  const m=document.getElementById('ctx-menu');
+  m.classList.add('open');
+  m.style.left=Math.min(e.clientX,window.innerWidth-180)+'px';
+  m.style.top=Math.min(e.clientY,window.innerHeight-200)+'px';
+  document.getElementById('ctx-fav').style.display='none';
+  document.getElementById('ctx-move').style.display='none';
+}
+
 // Context menu
 function showCtxMenu(e,id,type='file'){e.stopPropagation();ctxTarget=id;ctxItemType=type;const m=document.getElementById('ctx-menu');m.classList.add('open');m.style.left=Math.min(e.clientX,window.innerWidth-180)+'px';m.style.top=Math.min(e.clientY,window.innerHeight-200)+'px';document.getElementById('ctx-fav').style.display=type==='folder'?'none':'flex';document.getElementById('ctx-move').style.display=type==='folder'?'none':'flex'}
 document.addEventListener('click',()=>document.getElementById('ctx-menu').classList.remove('open'));
@@ -1268,7 +1362,15 @@ async function ctxAction(act){
   else if(act==='fav')toggleFav(ctxTarget);
   else if(act==='rename'){const cur=allFiles.find(f=>f.id===ctxTarget)||allFolders.find(f=>f.id===ctxTarget);const n=prompt('New name:',cur?.name||'');if(!n)return;if(ctxItemType==='folder')await dbSet(`users/${uid()}/folders/${ctxTarget}/name`,n);else await dbSet(`users/${uid()}/files/${ctxTarget}/name`,n);toast('Renamed')}
   else if(act==='move'){if(!allFolders.length){toast('No folders yet');return}const names=allFolders.map((f,i)=>`${i+1}. ${f.name}`).join('\n');const c=prompt(`Move to:\n${names}\n\n(0=root):`);const idx=parseInt(c);if(isNaN(idx))return;await dbSet(`users/${uid()}/files/${ctxTarget}/folderId`,idx===0?null:allFolders[idx-1]?.id||null);toast('Moved')}
-  else if(act==='delete'){if(!confirm('Delete?'))return;if(ctxItemType==='folder')deleteFolder(ctxTarget);else{await dbDel(`users/${uid()}/files/${ctxTarget}`);toast('Deleted')}}
+  else if(act==='delete'){
+    if(!confirm('Delete?'))return;
+    if(ctxItemType==='folder'){
+      await deleteFolder(ctxTarget);
+    } else {
+      await dbDel(`users/${uid()}/files/${ctxTarget}`);
+      toast('File deleted');
+    }
+  }
 }
 
 // History
@@ -1286,16 +1388,45 @@ async function clearHistory(){if(!confirm('Clear all history?'))return;await dbD
 async function openFileById(id){
   const f=allFiles.find(x=>x.id===id);if(!f){toast('File not found');return}
   addHistory(id,f.name,f.type);
-  const data=f.data||(f.chunks?f.chunks.join(''):'');
-  if(!data){toast('File data missing');return}
+
+  // Reassemble chunks - Firebase stores them as an object {0:'...', 1:'...'} or array
+  let data='';
+  if(f.data){
+    data=f.data;
+  } else if(f.chunks){
+    // chunks could be an array OR a plain object with numeric keys from Firebase
+    if(Array.isArray(f.chunks)){
+      data=f.chunks.join('');
+    } else {
+      // Object with keys "0","1","2"... - sort numerically and join
+      const keys=Object.keys(f.chunks).sort((a,b)=>+a-+b);
+      data=keys.map(k=>f.chunks[k]).join('');
+    }
+  }
+
+  if(!data){toast('File data missing — try re-uploading');return}
   activeFileId=id;activeFileType=f.type;activeFileObj=f;
   if(f.type==='pdf')openPDF(f,data);else openPPTX(f,data);
 }
 
 // Storage info
 function updateStorage(){
-  let total=0;allFiles.forEach(f=>{if(f.chunks)total+=f.chunks.reduce((s,c)=>s+c.length,0);else if(f.data)total+=f.data.length});
-  const mb=(total/1024/1024).toFixed(2);document.getElementById('s-lbl').textContent=`${mb} MB used`;document.getElementById('s-bar').style.width=Math.min(total/(256*1024*1024)*100,100)+'%';
+  let total=0;
+  allFiles.forEach(f=>{
+    if(f.chunks){
+      if(Array.isArray(f.chunks)){
+        total+=f.chunks.reduce((s,c)=>s+(c?.length||0),0);
+      } else {
+        // Firebase object with numeric keys
+        total+=Object.values(f.chunks).reduce((s,c)=>s+(c?.length||0),0);
+      }
+    } else if(f.data){
+      total+=f.data.length;
+    }
+  });
+  const mb=(total/1024/1024).toFixed(2);
+  document.getElementById('s-lbl').textContent=`${mb} MB used`;
+  document.getElementById('s-bar').style.width=Math.min(total/(256*1024*1024)*100,100)+'%';
 }
 
 // ═══ ZOOM ═══
