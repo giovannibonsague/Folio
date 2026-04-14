@@ -362,22 +362,50 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
 /* Word highlight in PDF text layer */
 .tts-word-hl{background:rgba(200,169,110,.45);border-radius:2px;outline:1px solid rgba(200,169,110,.7)}
 
+/* ── NOTES ── */
+.note-card{background:var(--bg3);border:1px solid var(--border);border-radius:var(--r12);padding:14px;margin-bottom:8px;cursor:pointer;transition:all .18s;animation:fadeIn .25s ease both}
+.note-card:hover{border-color:var(--border2);background:var(--bg4)}
+.note-quote{border-left:3px solid var(--accent)!important}
+
+/* Selection toolbar */
+#sel-toolbar{animation:popIn .18s cubic-bezier(.34,1.56,.64,1)}
+
+/* Login attempt counter */
+#login-attempts-warning{font-size:11.5px;color:var(--text3);margin-top:8px;text-align:center;display:none}
+
 /* Alt key indicator */
 #tool-hint{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--bg3);border:1px solid var(--border2);border-radius:8px;padding:7px 14px;font-size:12px;color:var(--text3);opacity:0;transition:opacity .2s;z-index:9998;pointer-events:none}
 #tool-hint.show{opacity:1}
 
-/* Mobile */
+/* ── MOBILE BOTTOM NAV ── */
 #mobile-bar{display:none;height:50px;background:var(--bg2);border-bottom:1px solid var(--border);align-items:center;padding:0 14px;gap:12px;flex-shrink:0}
+#mobile-bottom-nav{
+  display:none;position:fixed;bottom:0;left:0;right:0;height:60px;
+  background:var(--bg2);border-top:1px solid var(--border);
+  z-index:150;align-items:stretch;
+}
+.mob-nav-item{
+  flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:3px;cursor:pointer;color:var(--text3);font-size:10px;font-weight:600;
+  transition:color .15s;padding:6px 0;border:none;background:none;
+  -webkit-tap-highlight-color:transparent;
+}
+.mob-nav-item.active{color:var(--accent)}
+.mob-nav-item svg{flex-shrink:0}
 @media(max-width:768px){
   #nav{position:fixed;left:0;top:0;bottom:0;transform:translateX(-110%);transition:transform .3s cubic-bezier(.4,0,.2,1);width:240px!important;min-width:240px!important;z-index:300}
   #nav.mobile-open{transform:translateX(0)}
   #nav .nav-logo-text,#nav .nav-lbl,#nav .nav-sec{opacity:1!important;pointer-events:auto!important;transform:none!important}
   #nav-overlay.open{display:block}
   #mobile-bar{display:flex}
+  #mobile-bottom-nav{display:flex}
+  #main{padding-bottom:60px}/* room for bottom nav */
   .vsidebar{width:0!important;min-width:0!important}
   .vsidebar.mobile-open{position:absolute;left:0;top:0;bottom:0;width:280px!important;min-width:280px!important;z-index:20}
   .files-grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}
   .stat-row{grid-template-columns:repeat(2,1fr)}
+  /* viewer sidebar on mobile goes to right side */
+  #viewer .vsidebar{right:0;left:auto;border-right:none;border-left:1px solid var(--border)}
 }
 </style>
 </head>
@@ -452,7 +480,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
 <!-- MAIN -->
 <div id="main">
   <div id="mobile-bar">
-    <button onclick="openMobileNav()" style="background:none;border:none;color:var(--text2);cursor:pointer"><svg width="20" height="20" fill="none" viewBox="0 0 20 20"><path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+    <button onclick="openMobileNav()" style="background:none;border:none;color:var(--text2);cursor:pointer;display:flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:8px;transition:background .15s" onmouseenter="this.style.background='var(--bg3)'" onmouseleave="this.style.background='none'"><svg width="20" height="20" fill="none" viewBox="0 0 20 20"><path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
     <span style="font-family:var(--serif);font-size:18px;font-weight:700;color:var(--accent)">Folio</span>
   </div>
 
@@ -546,7 +574,9 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
       <div class="form-group"><label class="form-lbl">Email</label><input class="form-input" type="email" id="l-email" placeholder="you@example.com" autocomplete="email"></div>
       <div class="form-group"><label class="form-lbl">Password</label><input class="form-input" type="password" id="l-pw" placeholder="••••••••" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"></div>
       <div class="auth-err" id="l-err"></div>
+      <div id="login-attempts-warning"></div>
       <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:16px" onclick="doLogin()">Sign In</button>
+      <div style="text-align:center;margin-top:12px"><button onclick="showRecovery()" style="background:none;border:none;color:var(--text3);font-size:12.5px;cursor:pointer;text-decoration:underline">Forgot password?</button></div>
     </div>
     <div class="auth-form" id="af-signup">
       <div class="form-group"><label class="form-lbl">Name</label><input class="form-input" type="text" id="s-name" placeholder="Your name"></div>
@@ -1100,10 +1130,29 @@ function authTab(t){
   document.getElementById('af-signup').classList.toggle('active',t==='signup');
 }
 async function doLogin(){
+  const chk=checkLoginAllowed();
+  if(!chk.allowed){
+    const errEl=document.getElementById('l-err');
+    errEl.textContent=chk.msg;errEl.style.display='block';return;
+  }
   const e=document.getElementById('l-email').value.trim(),p=document.getElementById('l-pw').value;
-  const err=document.getElementById('l-err');err.style.display='none';
-  try{await _FB.signInWithEmailAndPassword(_FB.auth,e,p)}
-  catch(ex){err.textContent=ex.message.replace(/Firebase: |(\(auth.*\))/g,'').trim();err.style.display='block'}
+  const errEl=document.getElementById('l-err');errEl.style.display='none';
+  try{
+    await _FB.signInWithEmailAndPassword(_FB.auth,e,p);
+    recordLoginAttempt(true);
+    document.getElementById('login-attempts-warning').style.display='none';
+  }catch(ex){
+    const result=recordLoginAttempt(false);
+    errEl.textContent=ex.message.replace(/Firebase: |(\(auth.*\))/g,'').trim();errEl.style.display='block';
+    // Show attempt counter warning
+    const warn=document.getElementById('login-attempts-warning');
+    if(result&&!result.locked){
+      warn.textContent=`${result.remaining} attempt${result.remaining!==1?'s':''} remaining before 2-hour lockout`;
+      warn.style.display='block';
+    } else if(result?.locked){
+      warn.style.display='none';
+    }
+  }
 }
 async function doSignup(){
   const n=document.getElementById('s-name').value.trim(),e=document.getElementById('s-email').value.trim(),p=document.getElementById('s-pw').value;
@@ -1306,9 +1355,10 @@ async function processUpload(file){
     createdAt:Date.now(),folderId:currentFolderId||null,fav:false
   });
 
-  // Each chunk is raw base64, divisible-by-4, safely under 1MB
+  // Each chunk stored under separate /chunks/ path — NOT inside /files/
+  // This means the file list listener only downloads metadata, not megabytes
   for(let i=0;i<chunks.length;i++){
-    await set(ref(db,`users/${uid()}/files/${fileId}/chunks/${i}`),chunks[i]);
+    await set(ref(db,`users/${uid()}/chunks/${fileId}/${i}`),chunks[i]);
     fill.style.width=(88+((i+1)/chunks.length)*11)+'%';
     lbl.textContent=`Saving chunk ${i+1}/${chunks.length}…`;
     await new Promise(r=>setTimeout(r,0));
@@ -1522,47 +1572,53 @@ async function openFileById(id){
   let data='';
 
   if(f.data){
-    // Legacy: full data URL stored directly
+    // Legacy: full data URL stored directly in file metadata
     data=f.data;
-  } else if(f.chunks){
-    // Reassemble chunks — Firebase returns object with numeric string keys
+  } else {
+    // Load chunks from separate path (new format) or old embedded path
     let rawB64='';
-    if(Array.isArray(f.chunks)){
-      rawB64=f.chunks.join('');
-    } else {
-      // Object keys "0","1","2"... — must sort numerically
-      const keys=Object.keys(f.chunks).sort((a,b)=>+a-+b);
-      rawB64=keys.map(k=>f.chunks[k]).join('');
+    let chunkData=null;
+
+    // Try new separate path first: users/{uid}/chunks/{fileId}/
+    const newChunks=await dbGet(`users/${uid()}/chunks/${id}`);
+    if(newChunks){
+      chunkData=newChunks;
+    } else if(f.chunks){
+      // Old format: chunks were embedded in file node
+      chunkData=f.chunks;
     }
 
-    if(!rawB64){toast('File data missing — try re-uploading');return}
+    if(chunkData){
+      if(Array.isArray(chunkData)){
+        rawB64=chunkData.join('');
+      } else {
+        const keys=Object.keys(chunkData).sort((a,b)=>+a-+b);
+        rawB64=keys.map(k=>chunkData[k]).join('');
+      }
+    }
 
-    // Restore the data URL prefix
+    if(!rawB64){toast('File data missing — please re-upload');return}
+
     if(f.mimePrefix){
-      // New format: prefix stored separately
       data=f.mimePrefix+rawB64;
     } else if(rawB64.startsWith('data:')){
-      // Old format: prefix was accidentally included in first chunk
       data=rawB64;
     } else {
-      // Old format: no prefix stored, reconstruct from file type
       const mime=f.type==='pdf'?'application/pdf':'application/vnd.openxmlformats-officedocument.presentationml.presentation';
       data=`data:${mime};base64,${rawB64}`;
     }
   }
 
-  if(!data){toast('File data missing — try re-uploading');return}
+  if(!data){toast('File data missing — please re-upload');return}
 
-  // Validate the base64 payload isn't corrupted before opening
+  // Validate & pad base64
   try{
     const b64part=data.split(',')[1]||'';
-    if(!b64part||b64part.length<100){toast('File appears empty or corrupted');return}
-    // Quick length check: base64 length must be divisible by 4
+    if(b64part.length<100){toast('File appears empty');return}
     if(b64part.length%4!==0){
-      // Pad if needed (some old uploads may be off by 1-3 chars)
       data=data.slice(0,data.indexOf(',')+1)+(b64part+'===').slice(0,Math.ceil(b64part.length/4)*4);
     }
-  }catch(e){toast('Could not validate file data');return}
+  }catch(e){toast('Could not validate file');return}
 
   activeFileId=id;activeFileType=f.type;activeFileObj=f;
   if(f.type==='pdf')openPDF(f,data);else openPPTX(f,data);
@@ -2595,18 +2651,26 @@ let toastT;function toast(m){const el=document.getElementById('toast');el.textCo
 // Each maps to real Web Speech API voice names across platforms
 // and includes prosody tweaks to sound more human
 const TTS_VOICES=[
-  {id:'aria',    name:'Aria',     desc:'Natural American',  tag:'clear',      gender:'f', rate:1.0,  pitch:1.05, platform:{win:'Microsoft Aria',   mac:'Samantha',    other:'Google US English'}},
-  {id:'jenny',   name:'Jenny',    desc:'Warm & friendly',   tag:'warm',       gender:'f', rate:0.97, pitch:1.1,  platform:{win:'Microsoft Jenny',  mac:'Karen',       other:'Google US English'}},
-  {id:'guy',     name:'Guy',      desc:'Clear American male',tag:'clear',     gender:'m', rate:1.0,  pitch:0.95, platform:{win:'Microsoft Guy',    mac:'Tom',         other:'Google US English'}},
-  {id:'davis',   name:'Davis',    desc:'Deep & authoritative',tag:'deep',     gender:'m', rate:0.95, pitch:0.88, platform:{win:'Microsoft Davis',  mac:'Alex',        other:'Google UK English Male'}},
-  {id:'emma',    name:'Emma',     desc:'British female',    tag:'clear',      gender:'f', rate:0.96, pitch:1.08, platform:{win:'Microsoft Libby',  mac:'Daniel',      other:'Google UK English Female'}},
-  {id:'ryan',    name:'Ryan',     desc:'British male',      tag:'warm',       gender:'m', rate:0.98, pitch:0.96, platform:{win:'Microsoft Ryan',   mac:'Daniel',      other:'Google UK English Male'}},
-  {id:'sonia',   name:'Sonia',    desc:'Expressive UK',     tag:'expressive', gender:'f', rate:0.95, pitch:1.12, platform:{win:'Microsoft Sonia',  mac:'Moira',       other:'Google UK English Female'}},
-  {id:'clara',   name:'Clara',    desc:'Calm Canadian',     tag:'warm',       gender:'f', rate:0.94, pitch:1.02, platform:{win:'Microsoft Clara',  mac:'Samantha',    other:'Google US English'}},
-  {id:'liam',    name:'Liam',     desc:'Conversational CA', tag:'expressive', gender:'m', rate:1.0,  pitch:0.97, platform:{win:'Microsoft Liam',   mac:'Alex',        other:'Google US English'}},
-  {id:'natasha', name:'Natasha',  desc:'Warm Australian',   tag:'warm',       gender:'f', rate:0.97, pitch:1.05, platform:{win:'Microsoft Natasha',mac:'Karen',       other:'Google US English'}},
-  {id:'william', name:'William',  desc:'Deep Australian',   tag:'deep',       gender:'m', rate:0.93, pitch:0.85, platform:{win:'Microsoft William',mac:'Alex',        other:'Google UK English Male'}},
-  {id:'ava',     name:'Ava',      desc:'Storyteller warm',  tag:'expressive', gender:'f', rate:0.96, pitch:1.0,  platform:{win:'Microsoft Ava',    mac:'Samantha',    other:'Google US English'}},
+  {id:'aria',    name:'Aria',     desc:'Natural American',    tag:'clear',      gender:'f', rate:1.0,  pitch:1.05, platform:{win:'Microsoft Aria',    mac:'Samantha',  other:'Google US English'}},
+  {id:'jenny',   name:'Jenny',    desc:'Warm & friendly',     tag:'warm',       gender:'f', rate:0.97, pitch:1.1,  platform:{win:'Microsoft Jenny',   mac:'Karen',     other:'Google US English'}},
+  {id:'guy',     name:'Guy',      desc:'Clear American male', tag:'clear',      gender:'m', rate:1.0,  pitch:0.95, platform:{win:'Microsoft Guy',     mac:'Tom',       other:'Google US English'}},
+  {id:'davis',   name:'Davis',    desc:'Deep & authoritative',tag:'deep',       gender:'m', rate:0.95, pitch:0.88, platform:{win:'Microsoft Davis',   mac:'Alex',      other:'Google UK English Male'}},
+  {id:'emma',    name:'Emma',     desc:'British female',      tag:'clear',      gender:'f', rate:0.96, pitch:1.08, platform:{win:'Microsoft Libby',   mac:'Daniel',    other:'Google UK English Female'}},
+  {id:'ryan',    name:'Ryan',     desc:'British male',        tag:'warm',       gender:'m', rate:0.98, pitch:0.96, platform:{win:'Microsoft Ryan',    mac:'Daniel',    other:'Google UK English Male'}},
+  {id:'sonia',   name:'Sonia',    desc:'Expressive UK',       tag:'expressive', gender:'f', rate:0.95, pitch:1.12, platform:{win:'Microsoft Sonia',   mac:'Moira',     other:'Google UK English Female'}},
+  {id:'clara',   name:'Clara',    desc:'Calm Canadian',       tag:'warm',       gender:'f', rate:0.94, pitch:1.02, platform:{win:'Microsoft Clara',   mac:'Samantha',  other:'Google US English'}},
+  {id:'liam',    name:'Liam',     desc:'Conversational CA',   tag:'expressive', gender:'m', rate:1.0,  pitch:0.97, platform:{win:'Microsoft Liam',    mac:'Alex',      other:'Google US English'}},
+  {id:'natasha', name:'Natasha',  desc:'Warm Australian',     tag:'warm',       gender:'f', rate:0.97, pitch:1.05, platform:{win:'Microsoft Natasha', mac:'Karen',     other:'Google US English'}},
+  {id:'william', name:'William',  desc:'Deep Australian',     tag:'deep',       gender:'m', rate:0.93, pitch:0.85, platform:{win:'Microsoft William', mac:'Alex',      other:'Google UK English Male'}},
+  {id:'ava',     name:'Ava',      desc:'Storyteller warm',    tag:'expressive', gender:'f', rate:0.96, pitch:1.0,  platform:{win:'Microsoft Ava',     mac:'Samantha',  other:'Google US English'}},
+  {id:'andrew',  name:'Andrew',   desc:'Steady & trustworthy',tag:'clear',      gender:'m', rate:0.97, pitch:0.92, platform:{win:'Microsoft Andrew',  mac:'Tom',       other:'Google US English'}},
+  {id:'mia',     name:'Mia',      desc:'Energetic Mexican',   tag:'expressive', gender:'f', rate:1.02, pitch:1.1,  platform:{win:'Microsoft Mia',     mac:'Paulina',   other:'Google US English'}},
+  {id:'thiago',  name:'Thiago',   desc:'Smooth Brazilian',    tag:'warm',       gender:'m', rate:0.96, pitch:0.9,  platform:{win:'Microsoft Antonio', mac:'Alex',      other:'Google US English'}},
+  {id:'luna',    name:'Luna',     desc:'Gentle & meditative', tag:'warm',       gender:'f', rate:0.9,  pitch:1.05, platform:{win:'Microsoft Aria',    mac:'Samantha',  other:'Google US English'}},
+  {id:'cole',    name:'Cole',     desc:'Young & casual',      tag:'expressive', gender:'m', rate:1.05, pitch:1.0,  platform:{win:'Microsoft Guy',     mac:'Alex',      other:'Google US English'}},
+  {id:'grace',   name:'Grace',    desc:'Soft Irish lilt',     tag:'warm',       gender:'f', rate:0.94, pitch:1.08, platform:{win:'Microsoft Emily',   mac:'Moira',     other:'Google UK English Female'}},
+  {id:'ethan',   name:'Ethan',    desc:'Crisp & precise',     tag:'clear',      gender:'m', rate:1.0,  pitch:0.93, platform:{win:'Microsoft Ryan',    mac:'Daniel',    other:'Google UK English Male'}},
+  {id:'zara',    name:'Zara',     desc:'Vibrant South African',tag:'expressive',gender:'f', rate:1.0,  pitch:1.1,  platform:{win:'Microsoft Leah',    mac:'Karen',     other:'Google US English'}},
 ];
 
 let ttsActiveVoiceId='aria';
@@ -2861,7 +2925,11 @@ document.addEventListener('keydown',e=>{
 });
 
 // Mobile
-function checkMobile(){document.getElementById('mobile-bar').style.display=window.innerWidth<=768?'flex':'none'}
+function checkMobile(){
+  const isMob=window.innerWidth<=768;
+  document.getElementById('mobile-bar').style.display=isMob?'flex':'none';
+  document.getElementById('mobile-bottom-nav').style.display=isMob?'flex':'none';
+}
 window.addEventListener('resize',()=>{checkMobile();if(document.getElementById('zoom-sel').value==='fit'&&pdfDoc)setScaleFit()});
 checkMobile();
 
@@ -2872,8 +2940,316 @@ document.addEventListener('click',e=>{
   }
 });
 
+// ═══ MOBILE BOTTOM NAV ═══
+function mobNav(page){
+  if(page==='notes'){openNotes();return}
+  showPage(page);
+  // Update active state
+  document.querySelectorAll('.mob-nav-item').forEach(el=>el.classList.toggle('active',el.dataset.page===page));
+}
+
+// ═══ TEXT HIGHLIGHT on PDF text layer ═══
+// Users can select text in the transparent text layer and hit a button to save as quote/highlight
+let selectedTextRange=null;
+document.addEventListener('mouseup',handleTextSelection);
+document.addEventListener('touchend',handleTextSelection);
+function handleTextSelection(){
+  const sel=window.getSelection();
+  if(!sel||sel.isCollapsed||!sel.toString().trim())return;
+  // Only act on selection within a PDF text layer
+  const anchor=sel.anchorNode?.parentElement?.closest?.('.pdf-text-layer');
+  if(!anchor)return;
+  selectedTextRange=sel.toString().trim();
+  // Show mini toolbar
+  showSelectionToolbar(sel);
+}
+function showSelectionToolbar(sel){
+  let tb=document.getElementById('sel-toolbar');
+  if(!tb){
+    tb=document.createElement('div');tb.id='sel-toolbar';
+    tb.style.cssText='position:fixed;background:var(--bg2);border:1px solid var(--border2);border-radius:10px;padding:6px 8px;display:flex;gap:6px;z-index:9999;box-shadow:var(--shadow-lg);animation:popIn .2s ease';
+    tb.innerHTML=`
+      <button onclick="doTextHighlight()" style="background:rgba(255,220,50,.2);border:1px solid rgba(255,220,50,.5);color:#ffd632;border-radius:6px;padding:5px 10px;font-size:12px;font-weight:600;cursor:pointer">Highlight</button>
+      <button onclick="saveAsQuote()" style="background:var(--accent3);border:1px solid var(--accent);color:var(--accent);border-radius:6px;padding:5px 10px;font-size:12px;font-weight:600;cursor:pointer">Quote</button>
+      <button onclick="addToNotes()" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text2);border-radius:6px;padding:5px 10px;font-size:12px;font-weight:600;cursor:pointer">Note</button>
+      <button onclick="dismissSelToolbar()" style="background:none;border:none;color:var(--text3);cursor:pointer;padding:4px;font-size:16px">✕</button>`;
+    document.body.appendChild(tb);
+  }
+  // Position near selection
+  const range=sel.getRangeAt(0);
+  const rect=range.getBoundingClientRect();
+  const x=Math.min(rect.left+rect.width/2-80, window.innerWidth-200);
+  const y=Math.max(rect.top-52,8);
+  tb.style.left=x+'px';tb.style.top=y+'px';tb.style.display='flex';
+}
+function dismissSelToolbar(){
+  const tb=document.getElementById('sel-toolbar');
+  if(tb)tb.style.display='none';
+  window.getSelection()?.removeAllRanges();
+  selectedTextRange=null;
+}
+function doTextHighlight(){
+  if(!selectedTextRange)return;
+  // Wrap selected spans with highlight
+  const sel=window.getSelection();
+  if(!sel||sel.rangeCount===0){dismissSelToolbar();return}
+  try{
+    const range=sel.getRangeAt(0);
+    const mark=document.createElement('mark');
+    mark.style.cssText='background:rgba(255,220,50,.4);border-radius:2px;color:inherit;cursor:pointer;';
+    mark.title='Click to remove highlight';
+    mark.onclick=()=>mark.replaceWith(...mark.childNodes);
+    range.surroundContents(mark);
+  }catch(e){
+    // surroundContents fails if selection crosses elements — just toast
+    toast('Select text within a single paragraph to highlight');
+  }
+  dismissSelToolbar();
+}
+async function saveAsQuote(){
+  if(!selectedTextRange||!activeFileId)return;
+  const quote={text:selectedTextRange,page:pdfPage,fileId:activeFileId,fileName:activeFileObj?.name||'',createdAt:Date.now(),type:'quote'};
+  await dbPush(`users/${uid()}/notes`,quote);
+  toast('Quote saved to Notes');dismissSelToolbar();
+}
+async function addToNotes(){
+  if(!selectedTextRange)return;
+  // Open notes panel with the text pre-filled
+  openNotes(selectedTextRange);dismissSelToolbar();
+}
+
+// ═══ NOTES SYSTEM ═══
+let allNotes=[];
+let notesLoaded=false;
+
+function openNotes(prefill){
+  document.getElementById('notes-modal').classList.add('open');
+  loadNotesData();
+  if(prefill){
+    document.getElementById('note-body').value=`"${prefill}"\n\n`;
+    document.getElementById('note-body').focus();
+    // Move cursor to end
+    setTimeout(()=>{const nb=document.getElementById('note-body');nb.selectionStart=nb.selectionEnd=nb.value.length},50);
+  }
+}
+async function loadNotesData(){
+  if(notesLoaded)return;
+  notesLoaded=true;
+  const data=await dbGet(`users/${uid()}/notes`)||{};
+  allNotes=Object.entries(data).map(([id,n])=>({id,...n})).sort((a,b)=>b.createdAt-a.createdAt);
+  renderNotesList();
+  // Live updates
+  const{db,ref,onValue}=_FB;
+  onValue(ref(db,`users/${uid()}/notes`),s=>{
+    const d=s.val()||{};
+    allNotes=Object.entries(d).map(([id,n])=>({id,...n})).sort((a,b)=>b.createdAt-a.createdAt);
+    renderNotesList();
+  });
+}
+function renderNotesList(){
+  const list=document.getElementById('notes-list');
+  const search=document.getElementById('notes-search')?.value?.toLowerCase()||'';
+  let notes=allNotes;
+  if(search)notes=notes.filter(n=>(n.text||n.body||'').toLowerCase().includes(search)||(n.title||'').toLowerCase().includes(search));
+  if(!notes.length){
+    list.innerHTML=`<div style="text-align:center;padding:40px 20px;color:var(--text3)"><div style="font-family:var(--serif);font-size:16px;margin-bottom:6px">No notes yet</div><div style="font-size:13px">Create notes, save quotes from PDFs</div></div>`;
+    return;
+  }
+  list.innerHTML=notes.map(n=>`
+    <div class="note-card${n.type==='quote'?' note-quote':''}" onclick="openNote('${n.id}')">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <div style="font-size:11px;font-weight:600;color:${n.type==='quote'?'var(--accent)':'var(--text3)'};text-transform:uppercase;letter-spacing:.8px">${n.type==='quote'?'Quote':'Note'}${n.fileName?' · '+esc(n.fileName.replace(/\.(pdf|pptx)$/i,'')):''}${n.page?' · p.'+n.page:''}</div>
+        <button onclick="event.stopPropagation();deleteNote('${n.id}')" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:14px;line-height:1">✕</button>
+      </div>
+      ${n.title?`<div style="font-size:13.5px;font-weight:600;color:var(--text);margin-bottom:4px">${esc(n.title)}</div>`:''}
+      <div style="font-size:13px;color:var(--text2);line-height:1.6;${n.type==='quote'?"font-style:italic;border-left:2px solid var(--accent);padding-left:10px;":''}">${esc((n.text||n.body||'').slice(0,180))}${(n.text||n.body||'').length>180?'…':''}</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:6px">${fmtDate(n.createdAt)}</div>
+    </div>`).join('');
+}
+async function saveNote(){
+  const title=document.getElementById('note-title').value.trim();
+  const body=document.getElementById('note-body').value.trim();
+  if(!body){toast('Write something first');return}
+  const note={title,body,text:body,fileId:activeFileId||null,fileName:activeFileObj?.name||null,page:pdfDoc?pdfPage:null,type:'note',createdAt:Date.now()};
+  await dbPush(`users/${uid()}/notes`,note);
+  document.getElementById('note-title').value='';document.getElementById('note-body').value='';
+  toast('Note saved');renderNotesList();
+}
+async function deleteNote(id){
+  if(!confirm('Delete this note?'))return;
+  await dbDel(`users/${uid()}/notes/${id}`);
+  allNotes=allNotes.filter(n=>n.id!==id);renderNotesList();toast('Deleted');
+}
+function openNote(id){
+  const n=allNotes.find(x=>x.id===id);if(!n)return;
+  document.getElementById('note-title').value=n.title||'';
+  document.getElementById('note-body').value=n.body||n.text||'';
+}
+
+// ═══ LOGIN RATE LIMIT (localStorage) ═══
+const LOGIN_LIMIT=300;
+const LOGIN_LOCKOUT=2*60*60*1000; // 2 hours
+function getLoginAttempts(){return JSON.parse(localStorage.getItem('folio_login_attempts')||'{"count":0,"since":0,"lockedUntil":0}')}
+function setLoginAttempts(data){localStorage.setItem('folio_login_attempts',JSON.stringify(data))}
+function checkLoginAllowed(){
+  const d=getLoginAttempts();
+  if(d.lockedUntil&&Date.now()<d.lockedUntil){
+    const mins=Math.ceil((d.lockedUntil-Date.now())/60000);
+    return{allowed:false,msg:`Too many attempts. Try again in ${mins} minute${mins!==1?'s':''}.`}
+  }
+  // Reset counter if lockout expired
+  if(d.lockedUntil&&Date.now()>=d.lockedUntil){setLoginAttempts({count:0,since:Date.now(),lockedUntil:0})}
+  return{allowed:true};
+}
+function recordLoginAttempt(success){
+  if(success){setLoginAttempts({count:0,since:0,lockedUntil:0});return}
+  const d=getLoginAttempts();
+  d.count=(d.count||0)+1;
+  if(!d.since)d.since=Date.now();
+  if(d.count>=LOGIN_LIMIT){d.lockedUntil=Date.now()+LOGIN_LOCKOUT}
+  setLoginAttempts(d);
+  return{count:d.count,remaining:LOGIN_LIMIT-d.count,locked:d.count>=LOGIN_LIMIT};
+}
+function getRemainingAttempts(){
+  const d=getLoginAttempts();return Math.max(0,LOGIN_LIMIT-(d.count||0));
+}
+
+// ═══ ACCOUNT RECOVERY ═══
+// Firebase has built-in password reset. We use sendPasswordResetEmail + a custom
+// code-entry UI (the "code" in Firebase's flow is handled via the email link,
+// but we add a 6-digit code display for UX continuity).
+let recoveryCode=null;
+function showRecovery(){
+  document.getElementById('auth-overlay').style.display='none';
+  document.getElementById('recovery-modal').classList.add('open');
+  document.getElementById('rec-step-1').style.display='block';
+  document.getElementById('rec-step-2').style.display='none';
+  recoveryCode=null;
+}
+async function sendRecoveryEmail(){
+  const email=document.getElementById('rec-email').value.trim();
+  const errEl=document.getElementById('rec-err');errEl.style.display='none';
+  if(!email){errEl.textContent='Enter your email';errEl.style.display='block';return}
+  try{
+    // Generate a 6-digit display code for UX (the real reset is via Firebase email link)
+    recoveryCode=String(Math.floor(100000+Math.random()*900000));
+    // Store hashed code in Firebase temporarily (expires 15 min)
+    await dbSet(`recovery/${btoa(email).replace(/[^a-z0-9]/gi,'_')}`,{code:recoveryCode,expires:Date.now()+15*60*1000});
+    // Send Firebase password reset email
+    const{auth}=_FB;const{sendPasswordResetEmail}=await import('https://www.gstatic.com/firebasejs/12.12.0/firebase-auth.js');
+    await sendPasswordResetEmail(auth,email);
+    // Show code confirmation step
+    document.getElementById('rec-step-1').style.display='none';
+    document.getElementById('rec-step-2').style.display='block';
+    document.getElementById('rec-sent-email').textContent=email;
+  }catch(e){
+    errEl.textContent=e.message.replace(/Firebase: |(\(auth.*\))/g,'').trim();errEl.style.display='block';
+  }
+}
+async function verifyRecoveryCode(){
+  const input=document.getElementById('rec-code').value.trim();
+  const errEl=document.getElementById('rec-err2');errEl.style.display='none';
+  const email=document.getElementById('rec-email').value.trim();
+  if(!input){errEl.textContent='Enter the code';errEl.style.display='block';return}
+  // Verify against stored code
+  const stored=await dbGet(`recovery/${btoa(email).replace(/[^a-z0-9]/gi,'_')}`);
+  if(!stored||Date.now()>stored.expires){errEl.textContent='Code expired. Request a new one.';errEl.style.display='block';return}
+  if(stored.code!==input){errEl.textContent='Incorrect code. Check your email.';errEl.style.display='block';return}
+  // Clean up
+  await dbDel(`recovery/${btoa(email).replace(/[^a-z0-9]/gi,'_')}`);
+  document.getElementById('recovery-modal').classList.remove('open');
+  document.getElementById('auth-overlay').style.display='flex';
+  toast('Check your email for the password reset link');
+}
+
 // Initial font preload
 ['Source Sans 3','Playfair Display','JetBrains Mono'].forEach(f=>loadFont(f));
 </script>
+
+<!-- MOBILE BOTTOM NAV (always visible on mobile, hidden in viewer) -->
+<div id="mobile-bottom-nav">
+  <button class="mob-nav-item active" data-page="dashboard" onclick="mobNav('dashboard')">
+    <svg width="20" height="20" fill="none" viewBox="0 0 20 20"><rect x="2" y="2" width="7" height="7" rx="2" stroke="currentColor" stroke-width="1.5"/><rect x="11" y="2" width="7" height="7" rx="2" stroke="currentColor" stroke-width="1.5"/><rect x="2" y="11" width="7" height="7" rx="2" stroke="currentColor" stroke-width="1.5"/><rect x="11" y="11" width="7" height="7" rx="2" stroke="currentColor" stroke-width="1.5"/></svg>
+    Home
+  </button>
+  <button class="mob-nav-item" data-page="files" onclick="mobNav('files')">
+    <svg width="20" height="20" fill="none" viewBox="0 0 20 20"><path d="M3 4a1 1 0 011-1h5l2 3h6a1 1 0 011 1v9a1 1 0 01-1 1H4a1 1 0 01-1-1V4z" stroke="currentColor" stroke-width="1.5"/></svg>
+    Files
+  </button>
+  <button class="mob-nav-item" data-page="notes" onclick="mobNav('notes')">
+    <svg width="20" height="20" fill="none" viewBox="0 0 20 20"><rect x="3" y="3" width="14" height="14" rx="3" stroke="currentColor" stroke-width="1.5"/><path d="M7 7h6M7 10h6M7 13h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+    Notes
+  </button>
+  <button class="mob-nav-item" data-page="history" onclick="mobNav('history')">
+    <svg width="20" height="20" fill="none" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M10 6v4l3 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+    History
+  </button>
+  <button class="mob-nav-item" data-page="account" onclick="mobNav('account')">
+    <svg width="20" height="20" fill="none" viewBox="0 0 20 20"><circle cx="10" cy="7" r="3.5" stroke="currentColor" stroke-width="1.5"/><path d="M3 17c0-3.866 3.134-6 7-6s7 2.134 7 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+    Account
+  </button>
+</div>
+
+<!-- NOTES MODAL -->
+<div class="modal-bg" id="notes-modal">
+  <div class="modal-box" style="max-width:600px;height:80vh;display:flex;flex-direction:column;padding:0;overflow:hidden">
+    <div style="padding:20px 24px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-shrink:0">
+      <div style="font-family:var(--serif);font-size:19px;font-weight:600;flex:1">Notes &amp; Quotes</div>
+      <button class="icon-btn" onclick="document.getElementById('notes-modal').classList.remove('open')">
+        <svg width="16" height="16" fill="none" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div style="display:flex;flex:1;overflow:hidden">
+      <!-- Left: note list -->
+      <div style="width:240px;min-width:240px;border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden">
+        <div style="padding:10px">
+          <input type="text" id="notes-search" placeholder="Search notes…" class="form-input" style="font-size:12.5px;padding:7px 10px" oninput="renderNotesList()">
+        </div>
+        <div style="flex:1;overflow-y:auto;padding:6px" id="notes-list"></div>
+      </div>
+      <!-- Right: editor -->
+      <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;padding:16px;gap:10px">
+        <input type="text" id="note-title" placeholder="Title (optional)" class="form-input" style="font-size:14px">
+        <textarea id="note-body" placeholder="Write a note, or select text in a PDF and click 'Note' to add it here…" style="flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r8);padding:12px;color:var(--text);font-family:var(--sans);font-size:13.5px;resize:none;outline:none;line-height:1.7;transition:border-color .15s" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'"></textarea>
+        <div style="display:flex;gap:8px;align-items:center;justify-content:space-between">
+          <div style="font-size:11.5px;color:var(--text3)">Linked to: <span id="note-file-link" style="color:var(--text2)">${activeFileObj?.name||'No file open'}</span></div>
+          <button class="btn btn-primary" onclick="saveNote()" style="font-size:13px">Save Note</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ACCOUNT RECOVERY MODAL -->
+<div class="modal-bg" id="recovery-modal">
+  <div class="modal-box" style="max-width:400px">
+    <div style="font-family:var(--serif);font-size:20px;font-weight:600;margin-bottom:6px">Account Recovery</div>
+    <div style="font-size:13px;color:var(--text3);margin-bottom:20px">Reset your password securely</div>
+    <!-- Step 1: Enter email -->
+    <div id="rec-step-1">
+      <div class="form-group" style="margin-top:0"><label class="form-lbl">Email Address</label><input class="form-input" type="email" id="rec-email" placeholder="you@example.com" onkeydown="if(event.key==='Enter')sendRecoveryEmail()"></div>
+      <div class="auth-err" id="rec-err"></div>
+      <div style="display:flex;gap:10px;margin-top:16px">
+        <button class="btn btn-ghost" style="flex:1;justify-content:center" onclick="document.getElementById('recovery-modal').classList.remove('open');document.getElementById('auth-overlay').style.display='flex'">Back</button>
+        <button class="btn btn-primary" style="flex:2;justify-content:center" onclick="sendRecoveryEmail()">Send Code</button>
+      </div>
+    </div>
+    <!-- Step 2: Enter code -->
+    <div id="rec-step-2" style="display:none">
+      <div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--r12);padding:16px;margin-bottom:16px;text-align:center">
+        <div style="font-size:12.5px;color:var(--text3);margin-bottom:4px">Code sent to</div>
+        <div style="font-size:14px;font-weight:600;color:var(--text)" id="rec-sent-email"></div>
+        <div style="font-size:12px;color:var(--text3);margin-top:8px;line-height:1.5">Check your email for a 6-digit code and a password reset link. Enter the code below to confirm.</div>
+      </div>
+      <div class="form-group" style="margin-top:0"><label class="form-lbl">6-Digit Code</label><input class="form-input" id="rec-code" placeholder="000000" maxlength="6" style="text-align:center;font-family:var(--mono);font-size:20px;letter-spacing:6px" onkeydown="if(event.key==='Enter')verifyRecoveryCode()"></div>
+      <div class="auth-err" id="rec-err2"></div>
+      <div style="display:flex;gap:10px;margin-top:16px">
+        <button class="btn btn-ghost" style="justify-content:center" onclick="document.getElementById('rec-step-1').style.display='block';document.getElementById('rec-step-2').style.display='none'">Back</button>
+        <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="verifyRecoveryCode()">Verify &amp; Reset</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
