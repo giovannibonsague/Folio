@@ -441,6 +441,10 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
       <svg width="17" height="17" fill="none" viewBox="0 0 17 17"><circle cx="8.5" cy="8.5" r="6.5" stroke="currentColor" stroke-width="1.4"/><path d="M8.5 5v3.5l2.5 1.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
       <span class="nav-lbl">History</span>
     </div>
+    <div class="nav-item" onclick="openNotes()">
+      <svg width="17" height="17" fill="none" viewBox="0 0 17 17"><rect x="2.5" y="2.5" width="12" height="12" rx="2.5" stroke="currentColor" stroke-width="1.4"/><path d="M5.5 6h6M5.5 9h6M5.5 12h4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+      <span class="nav-lbl">Notes</span>
+    </div>
     <div class="nav-sec">Add</div>
     <div class="nav-item" onclick="openUpload('pdf')">
       <svg width="17" height="17" fill="none" viewBox="0 0 17 17"><path d="M9.5 2H4.5a1 1 0 00-1 1v11a1 1 0 001 1h8a1 1 0 001-1V6l-4-4z" stroke="currentColor" stroke-width="1.4"/><path d="M9.5 2v4h4M8.5 8.5v4M6.5 10.5l2-2 2 2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -489,6 +493,10 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
     <div class="topbar">
       <h1>Dashboard</h1>
       <button class="btn btn-ghost" onclick="openFolderModal()" style="font-size:12px">New Folder</button>
+      <button class="btn btn-ghost" onclick="openFolderExplorer()" style="font-size:12px" title="Import folder from your device">
+        <svg width="13" height="13" fill="none" viewBox="0 0 13 13"><path d="M1 3a1 1 0 011-1h3l1 1.5H11a1 1 0 011 1v5.5a1 1 0 01-1 1H2a1 1 0 01-1-1V3z" stroke="currentColor" stroke-width="1.4"/><path d="M6.5 5.5v3M5 7l1.5 1.5L8 7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Import Folder
+      </button>
       <button class="btn btn-primary" onclick="openUpload('pdf')">
         <svg width="13" height="13" fill="none" viewBox="0 0 13 13"><path d="M6.5 2v9M2 6.5h9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         Add File
@@ -514,7 +522,11 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
       <h1>All Files</h1>
       <button class="btn btn-ghost" style="font-size:12px" onclick="openFolderModal()">New Folder</button>
       <button class="btn btn-ghost" style="font-size:12px" onclick="openUpload('pdf')">Add PDF</button>
-      <button class="btn btn-primary" style="font-size:12px" onclick="openUpload('pptx')">Add PPTX</button>
+      <button class="btn btn-ghost" style="font-size:12px" onclick="openUpload('pptx')">Add PPTX</button>
+      <button class="btn btn-primary" style="font-size:12px" onclick="openFolderExplorer()" title="Import an entire folder from your device">
+        <svg width="13" height="13" fill="none" viewBox="0 0 13 13"><path d="M1 3a1 1 0 011-1h3l1 1.5H11a1 1 0 011 1v5.5a1 1 0 01-1 1H2a1 1 0 01-1-1V3z" stroke="currentColor" stroke-width="1.4"/><path d="M6.5 5.5v3M5 7l1.5 1.5L8 7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Import Folder
+      </button>
     </div>
     <div class="files-scroll">
       <div class="files-toolbar">
@@ -1040,13 +1052,16 @@ onAuthStateChanged(auth,u=>{
   if(u){
     document.getElementById('auth-overlay').style.display='none';
     window._CU=u;
+    notesLoaded=false; // reset so notes reload for this user
     loadData();updateAcctUI(u);
-    // Check if onboarding needed
     const needsOnboard=sessionStorage.getItem('folio_new_user');
     if(needsOnboard){sessionStorage.removeItem('folio_new_user');showOnboard()}
   } else {
     document.getElementById('auth-overlay').style.display='flex';
     window._CU=null;
+    notesLoaded=false;
+    allNotes=[];
+    if(notesUnsubscribe){notesUnsubscribe();notesUnsubscribe=null;}
   }
 });
 </script>
@@ -1117,6 +1132,8 @@ function showPage(n){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.getElementById('page-'+n).classList.add('active');
   document.querySelectorAll('.nav-item[data-page]').forEach(el=>el.classList.toggle('active',el.dataset.page===n));
+  // Sync mobile bottom nav
+  document.querySelectorAll('.mob-nav-item[data-page]').forEach(el=>el.classList.toggle('active',el.dataset.page===n));
   if(n!=='files'){currentFolderId=null;document.querySelectorAll('.nav-folder-item').forEach(el=>{el.style.background='';el.style.color=''})}
   curPage=n;closeMobileNav();
   if(n==='files')renderFiles();
@@ -1651,6 +1668,7 @@ function fitScale(){
   if(!pdfNativeW)return 1.5;
   return aw/pdfNativeW;
 }
+function setScaleFit(){pdfScale=fitScale();rerenderAllPages()}
 function applyZoomPreset(v){
   const sel=document.getElementById('zoom-sel');
   const customInp=document.getElementById('zoom-custom');
@@ -1685,6 +1703,8 @@ const MAX_SIMULTANEOUS_RENDERS=3;
 async function openPDF(file,dataUrl){
   const viewer=document.getElementById('viewer');
   viewer.classList.add('open');
+  // Hide mobile bottom nav while in viewer
+  document.getElementById('mobile-bottom-nav').style.display='none';
   document.getElementById('pptx-area').classList.remove('show');
   document.getElementById('vca').style.display='flex';
   document.getElementById('vloading').style.display='flex';
@@ -1943,9 +1963,10 @@ function closeViewer(){
   if(intersectObserver){intersectObserver.disconnect();intersectObserver=null;}
   pdfDoc=null;pptxSlides=[];searchResults=[];allTextItems={};pageCanvases={};renderedPages=new Set();
   activeTool=null;resetToolUI();
-  // Clear page wraps
   const area=document.getElementById('vca');
   [...area.children].forEach(c=>{if(!c.id||c.id!=='vloading')c.remove()});
+  // Restore mobile bottom nav visibility
+  if(window.innerWidth<=768)document.getElementById('mobile-bottom-nav').style.display='flex';
 }
 
 async function prevPg(){
@@ -2502,6 +2523,7 @@ document.getElementById('opacity-sl')?.addEventListener('input',function(){docum
 // ═══ PPTX VIEWER ═══
 async function openPPTX(file,dataUrl){
   const viewer=document.getElementById('viewer');viewer.classList.add('open');
+  document.getElementById('mobile-bottom-nav').style.display='none';
   document.getElementById('vca').style.display='none';
   document.getElementById('pptx-area').classList.add('show');
   document.getElementById('v-title').textContent=file.name;
@@ -2675,6 +2697,9 @@ const TTS_VOICES=[
 
 let ttsActiveVoiceId='aria';
 let ttsSpeaking=false;
+let allNotes=[];
+let notesLoaded=false;
+let notesUnsubscribe=null;
 let ttsPaused=false;
 let ttsQueue=[];       // array of sentence strings
 let ttsQueueIdx=0;
@@ -2909,6 +2934,144 @@ function ttsHidePlayer(){document.getElementById('tts-player').style.display='no
 const _origCloseViewer=closeViewer;
 closeViewer=function(){ttsStop();_origCloseViewer()};
 
+// ═══ FOLDER EXPLORER IMPORT ═══
+let folderImportQueue=[];
+let folderImportDone=0;
+let folderImportTotal=0;
+let folderImportFolderId=null;
+
+function openFolderExplorer(){
+  // webkitdirectory is supported on Chrome, Edge, Firefox 50+
+  // Safari on iOS/macOS doesn't support it — fall back to multi-file picker
+  const inp=document.getElementById('folder-explorer-input');
+  const supports=('webkitdirectory' in inp||'mozdirectory' in inp);
+  if(supports){
+    inp.value='';inp.click();
+  } else {
+    // Fallback: let them pick multiple files; prompt for a folder name
+    const fallback=document.getElementById('folder-explorer-fallback');
+    fallback.value='';fallback.click();
+  }
+}
+
+async function handleFolderExplorer(e){
+  const files=[...e.target.files];
+  if(!files.length)return;
+
+  // Filter to supported formats
+  const supported=files.filter(f=>{
+    const ext=f.name.split('.').pop().toLowerCase();
+    return['pdf','pptx','ppt'].includes(ext);
+  });
+
+  if(!supported.length){
+    toast('No PDF or PPTX files found. Please select supported files.');
+    return;
+  }
+
+  // Derive folder name
+  let folderName='Imported Folder';
+  const hasRelativePath=supported[0].webkitRelativePath&&supported[0].webkitRelativePath.includes('/');
+  if(hasRelativePath){
+    // Use the top-level directory name from the OS path
+    folderName=supported[0].webkitRelativePath.split('/')[0]||folderName;
+  } else {
+    // Fallback: prompt the user for a name
+    const prompted=prompt('Name for this folder:','My Folder');
+    if(prompted===null)return; // user cancelled
+    folderName=prompted.trim()||'Imported Folder';
+  }
+
+  // Show progress modal
+  document.getElementById('folder-import-modal').classList.add('open');
+  document.getElementById('fi-folder-name').textContent=folderName;
+  document.getElementById('fi-total').textContent=supported.length;
+  document.getElementById('fi-done').textContent='0';
+  document.getElementById('fi-current').textContent='Creating folder…';
+  document.getElementById('fi-prog-fill').style.width='0%';
+  document.getElementById('fi-err-list').innerHTML='';
+
+  // Create the Folio folder in Firebase
+  const fid=await dbPush(`users/${uid()}/folders`,{
+    name:folderName,
+    color:folderColor||'#5599e0',
+    createdAt:Date.now()
+  });
+  folderImportFolderId=fid;
+  folderImportTotal=supported.length;
+  folderImportDone=0;
+
+  const errors=[];
+
+  for(let i=0;i<supported.length;i++){
+    const file=supported[i];
+    document.getElementById('fi-current').textContent=`Reading: ${file.name}`;
+    document.getElementById('fi-done').textContent=i;
+    document.getElementById('fi-prog-fill').style.width=Math.round(i/supported.length*95)+'%';
+
+    try{
+      await importSingleFile(file,fid);
+    }catch(err){
+      errors.push(`${file.name}: ${err.message}`);
+    }
+    folderImportDone=i+1;
+  }
+
+  document.getElementById('fi-prog-fill').style.width='100%';
+  document.getElementById('fi-done').textContent=supported.length;
+  document.getElementById('fi-current').textContent=errors.length
+    ?`Done — ${errors.length} file${errors.length!==1?'s':''} failed`
+    :`All ${supported.length} files imported successfully!`;
+
+  if(errors.length){
+    document.getElementById('fi-err-list').innerHTML=
+      `<div style="font-size:11.5px;color:var(--text3);margin-bottom:4px">Failed files:</div>`+
+      errors.map(e=>`<div style="font-size:11.5px;color:var(--danger);padding:2px 0">• ${esc(e)}</div>`).join('');
+  }
+
+  renderDash();
+  if(curPage==='files')renderFiles();
+  toast(`Imported ${supported.length-errors.length} of ${supported.length} files into "${folderName}"`);
+}
+
+async function importSingleFile(file,folderId){
+  const ext=file.name.split('.').pop().toLowerCase();
+  const type=['pdf'].includes(ext)?'pdf':'pptx';
+
+  // Read file as data URL
+  const base64=await new Promise((res,rej)=>{
+    const r=new FileReader();
+    r.onload=ev=>res(ev.target.result);
+    r.onerror=()=>rej(new Error('Read failed'));
+    r.readAsDataURL(file);
+  });
+
+  // Strip prefix and chunk
+  const commaIdx=base64.indexOf(',');
+  const mimePrefix=base64.slice(0,commaIdx+1);
+  const rawB64=base64.slice(commaIdx+1);
+  const CHUNK=720000;
+  const chunks=[];
+  for(let i=0;i<rawB64.length;i+=CHUNK)chunks.push(rawB64.slice(i,i+CHUNK));
+
+  const{db,ref,set,push}=_FB;
+  const newRef=push(ref(db,`users/${uid()}/files`));
+  const fileId=newRef.key;
+
+  await set(newRef,{
+    name:file.name,type,size:file.size,
+    chunkCount:chunks.length,mimePrefix,
+    createdAt:Date.now(),folderId,fav:false
+  });
+
+  for(let i=0;i<chunks.length;i++){
+    await set(ref(db,`users/${uid()}/chunks/${fileId}/${i}`),chunks[i]);
+    // Update progress text
+    document.getElementById('fi-current').textContent=`${file.name} — chunk ${i+1}/${chunks.length}`;
+    await new Promise(r=>setTimeout(r,0));
+  }
+}
+
 // ═══ KEYBOARD ═══
 document.addEventListener('keydown',e=>{
   // ALT = cancel tool
@@ -2927,25 +3090,35 @@ document.addEventListener('keydown',e=>{
 // Mobile
 function checkMobile(){
   const isMob=window.innerWidth<=768;
+  const viewerOpen=document.getElementById('viewer').classList.contains('open');
   document.getElementById('mobile-bar').style.display=isMob?'flex':'none';
-  document.getElementById('mobile-bottom-nav').style.display=isMob?'flex':'none';
+  document.getElementById('mobile-bottom-nav').style.display=(isMob&&!viewerOpen)?'flex':'none';
 }
 window.addEventListener('resize',()=>{checkMobile();if(document.getElementById('zoom-sel').value==='fit'&&pdfDoc)setScaleFit()});
 checkMobile();
 
-// Anno layer click deselect
+// Close modal-bg overlays when clicking outside the modal box
 document.addEventListener('click',e=>{
   if(!e.target.closest('.anno-el')){
     document.querySelectorAll('.anno-el').forEach(el=>el.classList.remove('anno-selected'));selectedAnno=null;
   }
+  // Close notes modal on backdrop click
+  const nm=document.getElementById('notes-modal');
+  if(nm&&nm.classList.contains('open')&&e.target===nm)nm.classList.remove('open');
+  // Close recovery modal on backdrop click
+  const rm=document.getElementById('recovery-modal');
+  if(rm&&rm.classList.contains('open')&&e.target===rm){rm.classList.remove('open');document.getElementById('auth-overlay').style.display='flex';}
 });
 
 // ═══ MOBILE BOTTOM NAV ═══
 function mobNav(page){
-  if(page==='notes'){openNotes();return}
+  if(page==='notes'){
+    openNotes();
+    // Update active state - notes isn't a full page so just highlight
+    document.querySelectorAll('.mob-nav-item').forEach(el=>el.classList.toggle('active',el.dataset.page==='notes'));
+    return;
+  }
   showPage(page);
-  // Update active state
-  document.querySelectorAll('.mob-nav-item').forEach(el=>el.classList.toggle('active',el.dataset.page===page));
 }
 
 // ═══ TEXT HIGHLIGHT on PDF text layer ═══
@@ -3019,32 +3192,34 @@ async function addToNotes(){
 }
 
 // ═══ NOTES SYSTEM ═══
-let allNotes=[];
-let notesLoaded=false;
 
 function openNotes(prefill){
   document.getElementById('notes-modal').classList.add('open');
+  // Update the file link label dynamically
+  const fl=document.getElementById('note-file-link');
+  if(fl)fl.textContent=activeFileObj?.name||'No file open';
   loadNotesData();
   if(prefill){
-    document.getElementById('note-body').value=`"${prefill}"\n\n`;
-    document.getElementById('note-body').focus();
-    // Move cursor to end
-    setTimeout(()=>{const nb=document.getElementById('note-body');nb.selectionStart=nb.selectionEnd=nb.value.length},50);
+    document.getElementById('note-title').value='';
+    document.getElementById('note-body').value='"'+prefill+'"\n\n';
+    setTimeout(()=>{const nb=document.getElementById('note-body');nb.focus();nb.selectionStart=nb.selectionEnd=nb.value.length},80);
   }
 }
 async function loadNotesData(){
   if(notesLoaded)return;
   notesLoaded=true;
+  if(notesUnsubscribe){notesUnsubscribe();notesUnsubscribe=null;}
   const data=await dbGet(`users/${uid()}/notes`)||{};
   allNotes=Object.entries(data).map(([id,n])=>({id,...n})).sort((a,b)=>b.createdAt-a.createdAt);
   renderNotesList();
   // Live updates
   const{db,ref,onValue}=_FB;
-  onValue(ref(db,`users/${uid()}/notes`),s=>{
+  const unsub=onValue(ref(db,`users/${uid()}/notes`),s=>{
     const d=s.val()||{};
     allNotes=Object.entries(d).map(([id,n])=>({id,...n})).sort((a,b)=>b.createdAt-a.createdAt);
     renderNotesList();
   });
+  notesUnsubscribe=unsub;
 }
 function renderNotesList(){
   const list=document.getElementById('notes-list');
@@ -3084,6 +3259,9 @@ function openNote(id){
   const n=allNotes.find(x=>x.id===id);if(!n)return;
   document.getElementById('note-title').value=n.title||'';
   document.getElementById('note-body').value=n.body||n.text||'';
+  const fl=document.getElementById('note-file-link');
+  if(fl)fl.textContent=n.fileName||'No file';
+  document.getElementById('note-body').focus();
 }
 
 // ═══ LOGIN RATE LIMIT (localStorage) ═══
@@ -3212,7 +3390,7 @@ async function verifyRecoveryCode(){
         <input type="text" id="note-title" placeholder="Title (optional)" class="form-input" style="font-size:14px">
         <textarea id="note-body" placeholder="Write a note, or select text in a PDF and click 'Note' to add it here…" style="flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r8);padding:12px;color:var(--text);font-family:var(--sans);font-size:13.5px;resize:none;outline:none;line-height:1.7;transition:border-color .15s" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'"></textarea>
         <div style="display:flex;gap:8px;align-items:center;justify-content:space-between">
-          <div style="font-size:11.5px;color:var(--text3)">Linked to: <span id="note-file-link" style="color:var(--text2)">${activeFileObj?.name||'No file open'}</span></div>
+          <div style="font-size:11.5px;color:var(--text3)">Linked to: <span id="note-file-link" style="color:var(--text2)">No file open</span></div>
           <button class="btn btn-primary" onclick="saveNote()" style="font-size:13px">Save Note</button>
         </div>
       </div>
@@ -3250,6 +3428,38 @@ async function verifyRecoveryCode(){
     </div>
   </div>
 </div>
+
+<!-- FOLDER IMPORT PROGRESS MODAL -->
+<div class="modal-bg" id="folder-import-modal">
+  <div class="modal-box" style="max-width:440px">
+    <div style="font-family:var(--serif);font-size:19px;font-weight:600;margin-bottom:4px">Importing Folder</div>
+    <div style="font-size:13px;color:var(--text3);margin-bottom:18px">Uploading all PDF &amp; PPTX files from <strong id="fi-folder-name" style="color:var(--text2)"></strong></div>
+
+    <div style="display:flex;align-items:baseline;gap:6px;margin-bottom:10px">
+      <span style="font-family:var(--mono);font-size:22px;font-weight:700;color:var(--accent)" id="fi-done">0</span>
+      <span style="color:var(--text3);font-size:14px">of</span>
+      <span style="font-family:var(--mono);font-size:22px;font-weight:700;color:var(--text)" id="fi-total">0</span>
+      <span style="color:var(--text3);font-size:13px">files</span>
+    </div>
+
+    <div class="prog-bar" style="margin-bottom:8px"><div class="prog-fill" id="fi-prog-fill" style="width:0%"></div></div>
+
+    <div style="font-size:12.5px;color:var(--text2);font-family:var(--mono);margin-bottom:14px;min-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" id="fi-current">Starting…</div>
+
+    <div id="fi-err-list" style="max-height:100px;overflow-y:auto;margin-bottom:14px"></div>
+
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="document.getElementById('folder-import-modal').classList.remove('open')">Close</button>
+      <button class="btn btn-primary" onclick="document.getElementById('folder-import-modal').classList.remove('open');openFolder(folderImportFolderId)" id="fi-view-btn">View Folder</button>
+    </div>
+  </div>
+</div>
+
+<!-- GLOBAL HIDDEN FILE INPUTS -->
+<!-- Primary: webkitdirectory for folder selection (Chrome, Edge, Firefox 50+) -->
+<input type="file" id="folder-explorer-input" style="display:none" multiple accept=".pdf,.pptx,.ppt" webkitdirectory onchange="handleFolderExplorer(event)">
+<!-- Fallback: multi-file picker for Safari/iOS which doesn't support webkitdirectory -->
+<input type="file" id="folder-explorer-fallback" style="display:none" multiple accept=".pdf,.pptx,.ppt" onchange="handleFolderExplorer(event)">
 
 </body>
 </html>
